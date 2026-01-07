@@ -1,0 +1,28 @@
+# Core
+python>=3.9
+
+# PyTorch
+torch>=1.13
+torchvision
+
+# Quantum & NLP
+lambeq
+pennylane
+
+# CLIP
+ftfy
+regex
+tqdm
+git+https://github.com/openai/CLIP.git
+
+# Data & ML
+numpy
+scipy
+pandas
+scikit-learn
+matplotlib
+pillow
+
+# Utilities
+certifi
+
