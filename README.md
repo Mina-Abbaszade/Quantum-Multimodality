@@ -1,3 +1,4 @@
+
 # Quantum Multimodality: Multi-Stage Compositional Concept Generalization
 
 This repository contains the code for experiments on **grounded compositional concept generalization**
@@ -73,4 +74,11 @@ Quantum-Multimodality/
 ├── scripts/            # Convenience run scripts
 ├── notebooks/          # Analysis notebooks
 └── paper/              # PDF and paper figures
+
+## Environment Setup
+
+To install dependencies:
+
+```bash
+pip install -r requirements.txt
 
