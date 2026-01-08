@@ -43,3 +43,21 @@ def supcon_loss(
 
     return loss
 
+import torch
+import numpy as np
+
+def supcon_acc(logits, labels) -> float:
+    """
+    Top-1 retrieval accuracy for SupCon-style batches.
+
+    logits: Tensor [N, N]
+    labels: Tensor or numpy array [N]
+    """
+    # Ensure torch tensors
+    if isinstance(labels, np.ndarray):
+        labels = torch.from_numpy(labels).to(logits.device)
+
+    preds = logits.argmax(dim=1)
+    correct = (labels[preds] == labels)
+    return correct.float().mean().item()
+

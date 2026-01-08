@@ -1,48 +1,39 @@
-import random
-import numpy as np
+# ==================================================
+# MPS single-object training (text = MPS, image = CLIP)
+# ==================================================
+
 import torch
+import numpy as np
+import pandas as pd
+from collections import defaultdict
 
-from lambeq import Dataset, PytorchTrainer
+# --------------------------------------------------
+# lambeq imports
+# --------------------------------------------------
+from lambeq import (
+    Dataset,
+    PytorchTrainer,
+    BobcatParser,
+    AtomicType
+)
+from lambeq.ansatz import MPSAnsatz
+from lambeq.backend.grammar import Ty, Box
+from lambeq.backend.tensor import Dim
 
+# --------------------------------------------------
+# Project imports
+# --------------------------------------------------
 from src.common.data import build_dataset_pairs
-from src.common.losses import supcon_loss
-from src.common.metrics import supcon_acc
-
-from src.models.classical.mps_encoder import (
-    build_mps_ansatz,
-    build_mps_sentence_circuits,
-    build_mps_image_diagram,
-)
-
-from src.models.classical.clip_image_encoder import (
-    load_clip,
-    encode_image_split,
-)
-
 from src.models.classical.mps_infonce_model import InfoNCEModel
+from src.models.classical.clip_image_encoder import load_clip, encode_image_split
+from src.common.losses import supcon_loss, supcon_acc
 
 
-# --------------------------------------------------
-# Reproducibility
-# --------------------------------------------------
+# ==================================================
+# Dataset
+# ==================================================
 
-SEED = 42
-random.seed(SEED)
-np.random.seed(SEED)
-torch.manual_seed(SEED)
-
-
-# --------------------------------------------------
-# Paths (EDIT THIS)
-# --------------------------------------------------
-
-IMAGE_ROOT = "/path/to/single_object_dataset"
-
-
-# --------------------------------------------------
-# Load dataset
-# --------------------------------------------------
-
+IMAGE_ROOT = "data/single_object"
 dataset_pairs = build_dataset_pairs(IMAGE_ROOT)
 
 records_train = dataset_pairs["train"]
@@ -50,26 +41,44 @@ records_val   = dataset_pairs["OOD_val"]
 records_test  = dataset_pairs["OOD_test"]
 
 
-# --------------------------------------------------
+# ==================================================
 # Sentence circuits (MPS)
-# --------------------------------------------------
+# ==================================================
 
-train_shapes = [shape for _, shape, _ in records_train]
-val_shapes   = [shape for _, shape, _ in records_val]
-test_shapes  = [shape for _, shape, _ in records_test]
+shape_type = Ty("shape")
+clip_type  = Ty("clip_shape")
+image_type = Ty("image")
 
-ansatz = build_mps_ansatz(dim=512, bond_dim=10)
+shape_box = Box("SHAPE", Ty(), shape_type)
+clip_box  = Box("CLIP_SHAPE", Ty(), clip_type)
 
-train_sen = build_mps_sentence_circuits(train_shapes, ansatz)
-val_sen   = build_mps_sentence_circuits(val_shapes,   ansatz)
-test_sen  = build_mps_sentence_circuits(test_shapes,  ansatz)
+parser = BobcatParser(verbose="suppress")
+
+dim = 512
+ansatz = MPSAnsatz(
+    {
+        AtomicType.NOUN: Dim(dim),
+        AtomicType.SENTENCE: Dim(dim),
+        AtomicType.PREPOSITIONAL_PHRASE: Dim(dim),
+        clip_type: Dim(dim),
+        image_type: Dim(dim),
+    },
+    bond_dim=10,
+)
+
+def build_sentence_circuits(records):
+    shapes = [shape for _, shape, _ in records]
+    diagrams = [parser.sentence2diagram(s) for s in shapes]
+    return [ansatz(d) for d in diagrams]
+
+train_sen = build_sentence_circuits(records_train)
+val_sen   = build_sentence_circuits(records_val)
+test_sen  = build_sentence_circuits(records_test)
 
 
-# --------------------------------------------------
+# ==================================================
 # Image features (CLIP)
-# --------------------------------------------------
-
-import pandas as pd
+# ==================================================
 
 df_train = pd.DataFrame(records_train, columns=["raw", "shape", "image_file_path"])
 df_val   = pd.DataFrame(records_val,   columns=["raw", "shape", "image_file_path"])
@@ -82,11 +91,9 @@ val_feats   = encode_image_split(df_val,   clip_model, preprocess, device)
 test_feats  = encode_image_split(df_test,  clip_model, preprocess, device)
 
 
-# --------------------------------------------------
-# SupCon batching (identical to quantum)
-# --------------------------------------------------
-
-from collections import defaultdict
+# ==================================================
+# SupCon dataset construction
+# ==================================================
 
 def build_supcon_dataset(records, sen, img, k=8, batch_size=32):
     shape_to_idxs = defaultdict(list)
@@ -96,10 +103,10 @@ def build_supcon_dataset(records, sen, img, k=8, batch_size=32):
     shapes = sorted(shape_to_idxs.keys())
 
     all_pairs, all_labels = [], []
-    for s_idx, s in enumerate(shapes):
+    for label, s in enumerate(shapes):
         for i in shape_to_idxs[s][:k]:
             all_pairs.append((sen[i], img[i]))
-            all_labels.append(s_idx)
+            all_labels.append(label)
 
     return Dataset(
         all_pairs,
@@ -107,46 +114,51 @@ def build_supcon_dataset(records, sen, img, k=8, batch_size=32):
         batch_size=batch_size,
     )
 
-
 train_dataset = build_supcon_dataset(records_train, train_sen, train_feats)
 val_dataset   = build_supcon_dataset(records_val,   val_sen,   val_feats)
 test_dataset  = build_supcon_dataset(records_test,  test_sen,  test_feats)
 
 
-# --------------------------------------------------
-# Train
-# --------------------------------------------------
+# ==================================================
+# Model
+# ==================================================
+
+all_circuits = train_sen + val_sen + test_sen
 
 model = InfoNCEModel.from_diagrams(
-    train_dataset.diagrams,
+    all_circuits,
     temperature=0.07,
 )
+
+
+# ==================================================
+# Training
+# ==================================================
 
 trainer = PytorchTrainer(
     model=model,
     loss_function=supcon_loss,
     optimizer=torch.optim.Adam,
-    learning_rate=1e-2,
+    learning_rate=1e-3,
     epochs=10,
     evaluate_functions={"acc": supcon_acc},
     evaluate_on_train=True,
-    seed=SEED,
+    verbose="text",
 )
 
 trainer.fit(train_dataset, val_dataset)
 
 
-# --------------------------------------------------
-# Test
-# --------------------------------------------------
+# ==================================================
+# Test evaluation
+# ==================================================
 
 model.eval()
-accs = []
-
 with torch.no_grad():
-    for diagrams, labels in test_dataset:
-        logits = model(diagrams)
+    accs = []
+    for batch, labels in test_dataset:
+        logits = model(batch)
         accs.append(supcon_acc(logits, labels))
 
-print(f"Final OOD test accuracy (MPS): {np.mean(accs):.3f}")
+print(f"Final test accuracy: {np.mean(accs):.3f}")
 
