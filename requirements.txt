@@ -1,28 +1,24 @@
-# Core
-python>=3.9
-
-# PyTorch
-torch>=1.13
-torchvision
-
-# Quantum & NLP
-lambeq
-pennylane
-
-# CLIP
-ftfy
-regex
-tqdm
-git+https://github.com/openai/CLIP.git
-
-# Data & ML
+# Core scientific stack
 numpy
-scipy
 pandas
 scikit-learn
 matplotlib
 pillow
 
+# Deep learning
+torch
+torchvision
+torchaudio
+
+# Multimodal / grammar-based models
+lambeq
+
+# CLIP (image-text embeddings)
+git+https://github.com/openai/CLIP.git
+
+# Quantum simulation
+pennylane
+
 # Utilities
-certifi
+tqdm
 
