@@ -1,4 +1,6 @@
-# ===== Python =====
+# =========================
+# Python
+# =========================
 __pycache__/
 *.py[cod]
 *.pyo
@@ -8,27 +10,44 @@ __pycache__/
 venv/
 env/
 
-# ===== Jupyter =====
+# =========================
+# Jupyter
+# =========================
 .ipynb_checkpoints/
 
-# ===== OS =====
+# =========================
+# OS
+# =========================
 .DS_Store
 Thumbs.db
 
-# ===== Experiments & Outputs =====
+# =========================
+# IDEs
+# =========================
+.vscode/
+.idea/
+
+# =========================
+# Data (do NOT commit datasets)
+# =========================
+data/
+
+# =========================
+# Experiments & outputs
+# =========================
+runs/
 results/
 logs/
 checkpoints/
 outputs/
 
-# ===== Data =====
-data/raw/
-data/processed/
+# =========================
+# Environment dumps
+# =========================
+requirements_full.txt
 
-# ===== IDE =====
-.vscode/
-.idea/
-
-# ===== Misc =====
+# =========================
+# Misc
+# =========================
 *.log
 
