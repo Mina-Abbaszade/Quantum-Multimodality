@@ -1,22 +1,19 @@
 import torch
+import numpy as np
 
-
-def supcon_acc(logits: torch.Tensor, labels: torch.Tensor) -> float:
+def supcon_acc(logits, labels):
     """
-    Top-1 retrieval accuracy for supervised contrastive batches.
-
-    Args:
-        logits: Tensor of shape (N, N)
-        labels: Tensor of shape (N,)
-
-    Returns:
-        Accuracy as a float
+    Top-1 retrieval accuracy for SupCon batches.
+    Works with torch or numpy labels.
     """
-    # For each anchor, select the most similar image
+    # Ensure torch tensors
+    if isinstance(labels, np.ndarray):
+        labels = torch.from_numpy(labels).to(logits.device)
+    elif not isinstance(labels, torch.Tensor):
+        labels = torch.tensor(labels, device=logits.device)
+
     preds = logits.argmax(dim=1)
-
-    # Check if retrieved item has the same label
-    correct = labels[preds] == labels
+    correct = (labels[preds] == labels)
 
     return correct.float().mean().item()
 

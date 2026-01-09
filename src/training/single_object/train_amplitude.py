@@ -9,14 +9,12 @@ from src.common.data import build_dataset_pairs
 from src.common.losses import supcon_loss
 from src.common.metrics import supcon_acc
 from src.models.similarity_model import InfoNCEModel
-from src.models.quantum.angle_encoder import (
+from src.models.quantum.amplitude_encoder import (
     build_sentence_ansatz,
     build_sentence_circuits,
-)
-from src.models.quantum.amplitude_encoder import (
     amplitude_encode_images,
     build_amplitude_image_circuits,
-)
+)   
 
 # -------------------------
 # Reproducibility
@@ -31,7 +29,7 @@ torch.manual_seed(SEED)
 # Paths (EDIT THIS)
 # -------------------------
 
-IMAGE_ROOT = "/path/to/single_object_dataset"
+IMAGE_ROOT = "data/single_object"
 
 # -------------------------
 # Load dataset
@@ -63,30 +61,33 @@ test_sen  = build_sentence_circuits(test_caps, sentence_ansatz)
 device = "cuda" if torch.cuda.is_available() else "cpu"
 clip_model, preprocess = clip.load("ViT-B/32", device=device)
 
+from PIL import Image
+import numpy as np
+import torch
+
 def encode_images(records):
     feats = []
     for _, _, path in records:
-        img = preprocess(
-            clip_model.visual.preprocess(
-                clip_model.visual.preprocess(
-                    Image.open(path).convert("RGB")
-                )
-            )
-        )
+        image = Image.open(path).convert("RGB")
+
+        # Correct CLIP preprocessing (ONCE)
+        image_input = preprocess(image).unsqueeze(0).to(device)
+
         with torch.no_grad():
-            f = clip_model.encode_image(img.unsqueeze(0).to(device))
-            f = f / f.norm(dim=-1, keepdim=True)
-        feats.append(f.cpu().numpy().flatten())
+            feat = clip_model.encode_image(image_input)
+            feat = feat / feat.norm(dim=-1, keepdim=True)
+
+        feats.append(feat.cpu().numpy().flatten())
+
     return np.vstack(feats)
 
 train_feats = encode_images(train_records)
 val_feats   = encode_images(val_records)
 test_feats  = encode_images(test_records)
 
-pca = PCA(n_components=8)
-train_feats = pca.fit_transform(train_feats)
-val_feats   = pca.transform(val_feats)
-test_feats  = pca.transform(test_feats)
+assert train_feats.shape[1] == 512
+assert val_feats.shape[1] == 512
+assert test_feats.shape[1] == 512
 
 # -------------------------
 # Amplitude encoding
@@ -126,8 +127,15 @@ test_dataset  = build_supcon_dataset(test_records, test_sen, test_img)
 # Train
 # -------------------------
 
+# Register all quantum circuits (sentence + image)
+all_circuits = (
+    train_sen + train_img +
+    val_sen   + val_img +
+    test_sen  + test_img
+)
+
 model = InfoNCEModel.from_diagrams(
-    train_dataset.diagrams,
+    all_circuits,
     temperature=0.07
 )
 
