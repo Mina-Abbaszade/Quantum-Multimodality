@@ -3,8 +3,11 @@ import random
 import numpy as np
 import torch
 import clip
+from PIL import Image
 from sklearn.decomposition import PCA
 from lambeq import Dataset, PytorchTrainer
+from lambeq import IQPAnsatz, AtomicType
+from lambeq.backend.grammar import Ty, Box
 
 from src.common.data import build_dataset_pairs
 from src.common.losses import supcon_loss
@@ -30,7 +33,7 @@ torch.manual_seed(SEED)
 # Paths (EDIT THIS)
 # -------------------------
 
-IMAGE_ROOT = "/path/to/single_object_dataset"
+IMAGE_ROOT = "data/single_object"
 
 # -------------------------
 # Load dataset
@@ -65,15 +68,17 @@ clip_model, preprocess = clip.load("ViT-B/32", device=device)
 def encode_images(records):
     feats = []
     for _, _, path in records:
-        img = preprocess(
-            clip_model.visual.preprocess(
-                clip_model.visual.preprocess(Image.open(path).convert("RGB"))
-            )
-        )
+        image = Image.open(path).convert("RGB")
+
+        #  correct CLIP preprocessing (ONCE)
+        image_input = preprocess(image).unsqueeze(0).to(device)
+
         with torch.no_grad():
-            f = clip_model.encode_image(img.unsqueeze(0).to(device))
-            f = f / f.norm(dim=-1, keepdim=True)
-        feats.append(f.cpu().numpy().flatten())
+            feat = clip_model.encode_image(image_input)
+            feat = feat / feat.norm(dim=-1, keepdim=True)
+
+        feats.append(feat.cpu().numpy().flatten())
+
     return np.vstack(feats)
 
 train_feats = encode_images(train_records)
@@ -89,7 +94,35 @@ test_feats  = pca.transform(test_feats)
 # Build image circuits
 # -------------------------
 
-image_ansatz = build_image_ansatz()
+# --------------------------------------------------
+# Image diagram template (CLIP placeholder)
+# --------------------------------------------------
+
+clip_shape = Ty('clip_shape')
+image_diagram = Box(
+    name='CLIP_SHAPE',
+    dom=Ty(),
+    cod=clip_shape
+)
+
+# --------------------------------------------------
+# Image ansatz (angle encoding, single-object)
+# --------------------------------------------------
+
+clip_shape = Ty('clip_shape')
+image_type = Ty('image')
+
+image_ansatz = IQPAnsatz(
+    {
+        AtomicType.NOUN: 9,
+        AtomicType.SENTENCE: 1,
+        AtomicType.PREPOSITIONAL_PHRASE: 1,
+        clip_shape: 9,   # 9 angles for CLIP features
+        image_type: 1,
+    },
+    n_layers=1
+)
+
 ordered_symbols = list(image_ansatz(image_diagram).free_symbols)
 
 train_img = build_image_circuits(train_feats, image_ansatz, ordered_symbols)
@@ -123,10 +156,12 @@ test_dataset  = build_supcon_dataset(test_records,  test_sen,  test_img)
 # Train
 # -------------------------
 
-model = InfoNCEModel.from_diagrams(
-    train_dataset.diagrams,
-    temperature=0.07
+all_circuits = (
+    train_sen + train_img +
+    val_sen   + val_img +
+    test_sen  + test_img
 )
+model = InfoNCEModel.from_diagrams(all_circuits)
 
 trainer = PytorchTrainer(
     model=model,
@@ -153,4 +188,29 @@ with torch.no_grad():
         accs.append(supcon_acc(logits, labels))
 
 print(f"Final OOD test accuracy: {np.mean(accs):.3f}")
+
+# ============================================================
+# Save pretrained shape parameters (for multi-stage learning)
+# ============================================================
+
+import os
+
+SAVE_DIR = "pretrained"
+os.makedirs(SAVE_DIR, exist_ok=True)
+
+SAVE_PATH = os.path.join(SAVE_DIR, "single_object_angle_params.txt")
+
+final_weights = model.weights.detach().cpu().numpy()
+symbols = model.symbols
+
+# Only save shape-related parameters
+SHAPE_TOKENS = {"cone", "cube", "sphere", "cylinder"}
+
+with open(SAVE_PATH, "w") as f:
+    for sym, val in zip(symbols, final_weights):
+        name = sym.name
+        if any(tok in name for tok in SHAPE_TOKENS):
+            f.write(f"{name}: {val:.6f}\n")
+
+print(f"[OK] Saved pretrained shape parameters → {SAVE_PATH}")
 
