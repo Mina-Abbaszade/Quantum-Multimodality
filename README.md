@@ -82,3 +82,54 @@ To install dependencies:
 ```bash
 pip install -r requirements.txt
 
+---
+
+## Multi-Stage Training (Single → Relational)
+
+This repository implements the **multi-stage training protocol** used in the paper.
+
+The goal is to first learn **shape-specific quantum parameters** from single-object data,
+and then transfer (freeze) these parameters when training on **relational captions**.
+
+---
+
+### Stage 1: Single-Object Image–Caption Alignment (Angle Encoding)
+
+In Stage 1, the model is trained on **single objects** (cube, cone, cylinder, sphere)
+using the **image–caption alignment task** with angle encoding.
+
+This stage learns quantum parameters associated with **shape words only**.
+
+Run Stage 1 training with:
+
+```bash
+python -m src.training.single_object.train_angle
+
+After training, the learned parameters are saved to:
+pretrained/single_object_angle_params.txt
+
+###Stage 2: Relational Image–Caption Alignment (Multi-Stage)
+
+In Stage 2, the model is trained on **relational captions**, such as:
+
+- `cone left cube`
+- `sphere right cylinder`
+
+The training follows a **multi-stage transfer learning setup**:
+
+- Shape parameters learned in **Stage 1 (single-object training)** are **loaded and frozen**
+- Only **relational parameters** (e.g. *left*, *right*) are optimised
+
+### Running multi-stage relational training
+
+```bash
+python -m src.training.relational.train_angle_alignment_multistage
+The parameter loading and freezing logic is implemented in:
+src/models/quantum/relational/freezing.py
+
+## Notes
+
+- This repository focuses on **image–caption alignment**.
+- The same **parameter-freezing strategy** can be applied to **binary relation classification**.
+
+
